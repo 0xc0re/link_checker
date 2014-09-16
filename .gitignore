@@ -5,6 +5,12 @@ __pycache__/
 # C extensions
 *.so
 
+# Scrapy output and logs
+*.log
+*.json
+*.csv
+*.xml
+
 # Distribution / packaging
 .Python
 env/
