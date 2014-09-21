@@ -7,6 +7,7 @@ import sys
 from scrapy.contrib.spiders import CrawlSpider, Rule
 from scrapy.contrib.linkextractors import LinkExtractor
 from scrapy.selector import HtmlXPathSelector
+from scrapy.http import HtmlResponse
 import scrapy.utils.response
 from link_checker.items import LinkItem
 from scrapy import log, Selector
@@ -32,6 +33,7 @@ class LCheckSpider(CrawlSpider):
     valid_ed = re.compile(valid_re)
     html_ed = re.compile(r'\/html')
     start_urls = (
+        'http://www.edlinesites.net/pages/Kentfield_School_District/Board_of_Trustees/Board_Members/Ashley_Paff',
         'http://www.edlinesites.net/pages/Kentfield_School_District',
     )
     # Add our callback which will be called for every found link
@@ -58,9 +60,8 @@ class LCheckSpider(CrawlSpider):
         except StandardError as e:
             return 500
     
-    def domain_match(self, url, regex):
-        o = urlparse(url)
-        host = o.hostname
+    def domain_match(self, urlobj, regex):
+        host = urlobj.hostname
         return host and bool(regex.search(host))
         
     def get_base_url(self, response):
@@ -77,51 +78,42 @@ class LCheckSpider(CrawlSpider):
         return url.replace('/../', '')
 
     def check_page(self, response, is_start):
-        page_url = None
-        if is_start:
-            page_url = response.url
-        else:
-            page_url = response.request.headers.get('Referer', None)
-            
-        # try to stop following if we are on a "foreign" page
-        if not self.domain_match(page_url, self.test_ed):
-            log.msg('Returning without yield for %s' % page_url, level=log.DEBUG)
-            return
-        else:
-            if not is_start:
-                # check for non-html files
-                content_type = response.headers.get('content-type', None)
-                if content_type and not self.html_ed.search(content_type):
-                    abs_link_url   = response.url
-                    valid_domain   = self.domain_match(abs_link_url, self.valid_ed)
-                    valid_response = (response.status < 400)
-                    if not (valid_domain and valid_response):
-                        item = LinkItem()
-                        item['link_type']    = 'link'
-                        item['page_url']     = page_url
-                        item['rel_link_url'] = abs_link_url
-                        item['abs_link_url'] = abs_link_url
-                        item['file_urls']    = [abs_link_url]
-                        item['valid']        = valid_domain
-                        item['ok']           = valid_response
-                        yield item
+        abs_link_url   = response.url
+        urlobj = urlparse(abs_link_url)
+        valid_domain   = self.domain_match(urlobj, self.valid_ed)
+        if not is_start and not valid_domain and not isinstance(response, HtmlResponse):
+            # offsite link
+            item = LinkItem()
+            item['link_type']    = 'link'
+            item['page_url']     = response.request.headers.get('Referer', None)
+            item['rel_link_url'] = abs_link_url
+            item['abs_link_url'] = abs_link_url
+            item['file_urls']    = [abs_link_url]
+            item['valid']        = False
+            item['ok']           = True
+            yield item
+                
+        # images on valid pages        
+        if valid_domain:
             hxs = Selector(response)
             image_urls = hxs.xpath('//img/@src').extract()
             base_url = self.get_base_url(response)
             for image_url in image_urls:
                 abs_link_url   = self.abs_url(base_url, image_url)
-                valid_domain   = self.domain_match(abs_link_url, self.valid_ed)
-                valid_response = (self.get_status_code(abs_link_url) < 400)
-                if not (valid_domain and valid_response):
-                    item = LinkItem()
-                    item['link_type']    = 'image'
-                    item['page_url']     = page_url
-                    item['rel_link_url'] = image_url
-                    item['abs_link_url'] = abs_link_url
-                    item['file_urls']    = [abs_link_url]
-                    item['valid']        = valid_domain
-                    item['ok']           = valid_response
-                    yield item
+                urlobj = urlparse(abs_link_url)
+                if urlobj.scheme == 'http' or urlobj.scheme == 'https':
+                    valid_domain   = self.domain_match(urlobj, self.valid_ed)
+                    valid_response = (self.get_status_code(abs_link_url) < 400)
+                    if not (valid_domain and valid_response):
+                        item = LinkItem()
+                        item['link_type']    = 'image'
+                        item['page_url']     = response.url
+                        item['rel_link_url'] = image_url
+                        item['abs_link_url'] = abs_link_url
+                        item['file_urls']    = [abs_link_url]
+                        item['valid']        = valid_domain
+                        item['ok']           = valid_response
+                        yield item
         
     def parse_start_url(self, response):
         return self.check_page(response, True)

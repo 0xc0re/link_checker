@@ -8,7 +8,9 @@
 from scrapy import Field, Item 
 
 def downloaded_file_path(value):
-    return value[0]['path']
+    if len(value) > 0:
+        return value[0]['path']
+    return ''
 
 def empty_string(value):
     return ''
