@@ -9,9 +9,9 @@ import re
 from six.moves.urllib.parse import urlparse
 from scrapy.exceptions import DropItem
 
-class InvalidLinkPipeline(object):
+class InvalidLinksPipeline(object):
     def process_item(self, item, spider):
         if item['valid'] and item['ok']:
-            raise DropItem('Link ok: %s' % item['link_url'])
+            raise DropItem('Link ok: %s' % item['abs_link_url'])
         else:
             return item

@@ -7,10 +7,20 @@
 
 from scrapy import Field, Item 
 
+def downloaded_file_path(value):
+    return value[0]['path']
+
+def empty_string(value):
+    return ''
+    
 class LinkItem(Item):
     # define the fields for your item here like:
-    ltype    = Field()
-    page_url = Field()
-    link_url = Field()
-    valid    = Field()
-    ok       = Field()
+    link_type    = Field()
+    page_url     = Field()
+    rel_link_url = Field()
+    abs_link_url = Field()
+    valid        = Field()
+    ok           = Field()
+    # Required for FilesPipeline
+    file_urls    = Field(serializer=empty_string)
+    files        = Field(serializer=downloaded_file_path)

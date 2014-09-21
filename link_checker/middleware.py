@@ -7,13 +7,12 @@ See documentation in docs/topics/spider-middleware.rst
 import re
 
 from scrapy import signals
-from scrapy.http import Request
+from scrapy.http import Request, TextResponse
 from scrapy.utils.httpobj import urlparse_cached
 from scrapy import log
 from six.moves.urllib.parse import urlparse
 
 class OffsiteRefererMiddleware(object):
-
     def __init__(self, stats):
         self.stats = stats
 
@@ -24,20 +23,22 @@ class OffsiteRefererMiddleware(object):
         return o
 
     def process_spider_output(self, response, result, spider):
-        for x in result:
-            if isinstance(x, Request):
-                if x.dont_filter or self.should_follow(x, spider):
-                    yield x
+        # We could have images and PDFs here - they don't generate any links
+        if isinstance(response, TextResponse):
+            for x in result:
+                if isinstance(x, Request):
+                    if x.dont_filter or self.should_follow(x, spider):
+                        yield x
+                    else:
+                        domain = urlparse_cached(x).hostname
+                        if domain and domain not in self.domains_seen:
+                            self.domains_seen.add(domain)
+                            log.msg(format="Filtered offsite request to %(domain)r: %(request)s",
+                                    level=log.DEBUG, spider=spider, domain=domain, request=x)
+                            self.stats.inc_value('offsite/domains', spider=spider)
+                        self.stats.inc_value('offsite/filtered', spider=spider)
                 else:
-                    domain = urlparse_cached(x).hostname
-                    if domain and domain not in self.domains_seen:
-                        self.domains_seen.add(domain)
-                        log.msg(format="Filtered offsite request to %(domain)r: %(request)s",
-                                level=log.DEBUG, spider=spider, domain=domain, request=x)
-                        self.stats.inc_value('offsite/domains', spider=spider)
-                    self.stats.inc_value('offsite/filtered', spider=spider)
-            else:
-                yield x
+                    yield x
 
     def should_follow(self, request, spider):
         referer = request.headers.get('Referer', '')

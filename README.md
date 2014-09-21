@@ -8,4 +8,4 @@ source, but will not follow *from* an offsite source.
 
 To dump these "broken" links to a csv file:
 
-$ scrapy crawl link_checker -o crawl.csv
+$ scrapy crawl lcheck -o crawl.csv

@@ -3,28 +3,36 @@
 from six.moves.urllib.parse import urlparse, urljoin
 import httplib
 import re
+import sys
 from scrapy.contrib.spiders import CrawlSpider, Rule
 from scrapy.contrib.linkextractors import LinkExtractor
 from scrapy.selector import HtmlXPathSelector
-from scrapy.utils.response import get_base_url
+import scrapy.utils.response
 from link_checker.items import LinkItem
 from scrapy import log, Selector
 
 class LCheckSpider(CrawlSpider):
     name = 'lcheck'
-    test_ed = re.compile(r'^(.*\.)?(%s)$' % re.escape('edlinesites.net'))
     allowed_domains = [
         'edlinesites.net',
         'kentfieldschools.org',
         'sites.google.com'
     ]
+    valid_domains = [
+        'edlinesites.net',
+        'kentweb.kentfieldschools.org',
+        'sites.google.com'
+    ]
     follow_domains = [
         'edlinesites.net'
     ]
+    test_re = r'^(.*\.)?(%s)$' % '|'.join(re.escape(d) for d in follow_domains)
+    test_ed = re.compile(test_re)
+    valid_re = r'^(.*\.)?(%s)$' % '|'.join(re.escape(d) for d in valid_domains)
+    valid_ed = re.compile(valid_re)
+    html_ed = re.compile(r'\/html')
     start_urls = (
         'http://www.edlinesites.net/pages/Kentfield_School_District',
-    #    'http://www.edlinesites.net/pages/Bacich_Elementary_School',
-    #    'http://www.edlinesites.net/pages/Kent_Middle_School',
     )
     # Add our callback which will be called for every found link
     rules = (
@@ -54,6 +62,19 @@ class LCheckSpider(CrawlSpider):
         o = urlparse(url)
         host = o.hostname
         return host and bool(regex.search(host))
+        
+    def get_base_url(self, response):
+        try:
+            return scrapy.utils.response.get_base_url(response)
+        except:
+            pass
+        return ''
+        
+    def abs_url(self, base_url, rel_url):
+        url = rel_url
+        if base_url != '' and urlparse(rel_url).scheme == '':
+            url = urljoin(base_url, url)
+        return url.replace('/../', '')
 
     def check_page(self, response, is_start):
         page_url = None
@@ -68,25 +89,39 @@ class LCheckSpider(CrawlSpider):
             return
         else:
             if not is_start:
-                item = LinkItem()
-                item['ltype']    = 'link'
-                item['page_url'] = page_url
-                item['link_url'] = response.url
-                item['valid']    = self.domain_match(response.url, self.test_ed)
-                item['ok']       = (response.status < 400)
-                yield item
-            base_url = get_base_url(response)
+                # check for non-html files
+                content_type = response.headers.get('content-type', None)
+                if content_type and not self.html_ed.search(content_type):
+                    abs_link_url   = response.url
+                    valid_domain   = self.domain_match(abs_link_url, self.valid_ed)
+                    valid_response = (response.status < 400)
+                    if not (valid_domain and valid_response):
+                        item = LinkItem()
+                        item['link_type']    = 'link'
+                        item['page_url']     = page_url
+                        item['rel_link_url'] = abs_link_url
+                        item['abs_link_url'] = abs_link_url
+                        item['file_urls']    = [abs_link_url]
+                        item['valid']        = valid_domain
+                        item['ok']           = valid_response
+                        yield item
             hxs = Selector(response)
             image_urls = hxs.xpath('//img/@src').extract()
+            base_url = self.get_base_url(response)
             for image_url in image_urls:
-                abs_image_url = urljoin(base_url, image_url)
-                item = LinkItem()
-                item['ltype']    = 'image'
-                item['page_url'] = page_url
-                item['link_url'] = image_url
-                item['valid']    = self.domain_match(abs_image_url, self.test_ed)
-                item['ok']       = (self.get_status_code(abs_image_url) < 400)
-                yield item
+                abs_link_url   = self.abs_url(base_url, image_url)
+                valid_domain   = self.domain_match(abs_link_url, self.valid_ed)
+                valid_response = (self.get_status_code(abs_link_url) < 400)
+                if not (valid_domain and valid_response):
+                    item = LinkItem()
+                    item['link_type']    = 'image'
+                    item['page_url']     = page_url
+                    item['rel_link_url'] = image_url
+                    item['abs_link_url'] = abs_link_url
+                    item['file_urls']    = [abs_link_url]
+                    item['valid']        = valid_domain
+                    item['ok']           = valid_response
+                    yield item
         
     def parse_start_url(self, response):
         return self.check_page(response, True)
